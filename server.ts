@@ -604,40 +604,40 @@ app.post("/api/admin/sync-database", async (req, res) => {
 
 // Student Lookup Endpoint with cloud Firestore database cache syncing support
 app.get("/api/student-lookup", async (req, res) => {
-  const emailQuery = req.query.email as string;
-  if (!emailQuery) {
-    return res.status(400).json({ error: "Vui lòng cung cấp địa chỉ email." });
-  }
-
-  const targetEmail = emailQuery.trim().toLowerCase();
-  
-  // Try querying Firestore first for synchronized real-time lookup
-  if (db) {
-    try {
-      const docRef = db.collection("students").doc(targetEmail);
-      const doc = await docRef.get();
-      if (doc.exists) {
-        const cachedData = doc.data();
-        console.log(`Cache hit in Firestore for student: ${targetEmail}`);
-        return res.json({
-          success: true,
-          student: {
-            email: cachedData.email,
-            name: cachedData.name,
-            score: cachedData.score,
-            timestamp: cachedData.timestamp,
-          },
-          results: cachedData.results
-        });
-      }
-    } catch (err) {
-      console.error("Firestore cache lookup error, falling back to sheet:", err);
-    }
-  }
-
-  const config = await getAppConfig();
-
   try {
+    const emailQuery = req.query.email as string;
+    if (!emailQuery) {
+      return res.status(400).json({ error: "Vui lòng cung cấp địa chỉ email." });
+    }
+
+    const targetEmail = emailQuery.trim().toLowerCase();
+    
+    // Try querying Firestore first for synchronized real-time lookup
+    if (db) {
+      try {
+        const docRef = db.collection("students").doc(targetEmail);
+        const doc = await docRef.get();
+        if (doc.exists) {
+          const cachedData = doc.data() || {};
+          console.log(`Cache hit in Firestore for student: ${targetEmail}`);
+          return res.json({
+            success: true,
+            student: {
+              email: cachedData.email || targetEmail,
+              name: cachedData.name || "Học sinh",
+              score: cachedData.score || "",
+              timestamp: cachedData.timestamp || "",
+            },
+            results: cachedData.results || { correctCount: 0, totalQuestions: 0, questionsCheckedCount: 0, questions: [] }
+          });
+        }
+      } catch (err) {
+        console.error("Firestore cache lookup error, falling back to sheet:", err);
+      }
+    }
+
+    const config = await getAppConfig();
+
     // 1. Load Student Responses
     let s1Content = "";
     if (config.directSheet1Data) {
@@ -778,6 +778,7 @@ app.get("/api/student-lookup", async (req, res) => {
     });
 
   } catch (error: any) {
+    console.error("Error in /api/student-lookup:", error);
     res.status(500).json({ error: error.message || "Lỗi máy chủ khi xử lý dữ liệu." });
   }
 });

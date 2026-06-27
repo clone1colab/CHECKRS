@@ -31,6 +31,7 @@ const DEFAULT_CONFIG: AppConfig = {
 
 // Initialize Firebase Admin with dynamic settings
 let db: any = null;
+let isDbHealthy = true;
 try {
   const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
   if (fs.existsSync(firebaseConfigPath)) {
@@ -86,7 +87,7 @@ function saveConfig(config: AppConfig) {
 // Get config from Firestore (master) or fallback to local
 async function getAppConfig(): Promise<AppConfig> {
   const localConfig = loadConfig();
-  if (!db) return localConfig;
+  if (!db || !isDbHealthy) return localConfig;
 
   try {
     const docRef = db.collection("config").doc("main");
@@ -94,11 +95,22 @@ async function getAppConfig(): Promise<AppConfig> {
     if (doc.exists) {
       return { ...DEFAULT_CONFIG, ...doc.data() } as AppConfig;
     } else {
-      await docRef.set(localConfig);
+      try {
+        await docRef.set(localConfig);
+      } catch (writeErr: any) {
+        if (writeErr.message?.includes("PERMISSION_DENIED") || writeErr.code === 7) {
+          isDbHealthy = false;
+          console.warn("Firestore write access denied. Falling back to local storage.");
+        }
+      }
       return localConfig;
     }
-  } catch (err) {
+  } catch (err: any) {
     console.error("Error loading config from Firestore:", err);
+    if (err.message?.includes("PERMISSION_DENIED") || err.code === 7) {
+      isDbHealthy = false;
+      console.warn("Firestore access denied. Falling back permanently to local config storage.");
+    }
     return localConfig;
   }
 }
@@ -106,14 +118,19 @@ async function getAppConfig(): Promise<AppConfig> {
 // Save config to local file AND Firestore
 async function saveAppConfig(config: AppConfig): Promise<void> {
   saveConfig(config);
-  if (!db) return;
+  if (!db || !isDbHealthy) return;
 
   try {
     await db.collection("config").doc("main").set(config);
     console.log("Configuration successfully synchronized with Firestore.");
-  } catch (err) {
+  } catch (err: any) {
     console.error("Error saving config to Firestore:", err);
-    throw err;
+    if (err.message?.includes("PERMISSION_DENIED") || err.code === 7) {
+      isDbHealthy = false;
+      console.warn("Firestore access denied. Falling back permanently to local config storage.");
+    } else {
+      throw err;
+    }
   }
 }
 
@@ -451,8 +468,8 @@ app.post("/api/admin/sync-database", async (req, res) => {
     return res.status(401).json({ error: "Mật khẩu quản trị viên không chính xác!" });
   }
 
-  if (!db) {
-    return res.status(500).json({ error: "Cơ sở dữ liệu Firestore chưa được khởi tạo. Vui lòng kiểm tra cấu hình." });
+  if (!db || !isDbHealthy) {
+    return res.status(500).json({ error: "Cơ sở dữ liệu Firestore chưa được khởi tạo hoặc thiếu quyền ghi (Permission Denied). Vui lòng cấu hình phân quyền đầy đủ cho Service Account." });
   }
 
   try {
@@ -613,7 +630,7 @@ app.get("/api/student-lookup", async (req, res) => {
     const targetEmail = emailQuery.trim().toLowerCase();
     
     // Try querying Firestore first for synchronized real-time lookup
-    if (db) {
+    if (db && isDbHealthy) {
       try {
         const docRef = db.collection("students").doc(targetEmail);
         const doc = await docRef.get();
@@ -631,8 +648,12 @@ app.get("/api/student-lookup", async (req, res) => {
             results: cachedData.results || { correctCount: 0, totalQuestions: 0, questionsCheckedCount: 0, questions: [] }
           });
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Firestore cache lookup error, falling back to sheet:", err);
+        if (err.message?.includes("PERMISSION_DENIED") || err.code === 7) {
+          isDbHealthy = false;
+          console.warn("Firestore access denied. Disabling Firestore lookup caching.");
+        }
       }
     }
 
@@ -755,7 +776,7 @@ app.get("/api/student-lookup", async (req, res) => {
     };
 
     // Auto cache to Firestore so other instances can lookup instantly!
-    if (db) {
+    if (db && isDbHealthy) {
       try {
         await db.collection("students").doc(targetEmail).set({
           email: studentPayload.email,
@@ -766,8 +787,12 @@ app.get("/api/student-lookup", async (req, res) => {
           syncedAt: new Date().toISOString()
         });
         console.log(`Automatically cached student result for: ${targetEmail}`);
-      } catch (cacheErr) {
+      } catch (cacheErr: any) {
         console.error("Auto caching to Firestore failed:", cacheErr);
+        if (cacheErr.message?.includes("PERMISSION_DENIED") || cacheErr.code === 7) {
+          isDbHealthy = false;
+          console.warn("Firestore access denied. Disabling auto caching.");
+        }
       }
     }
 

@@ -19,11 +19,20 @@ export default function App() {
     setSearchError(null);
     try {
       const res = await fetch(`/api/student-lookup?email=${encodeURIComponent(email)}`);
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || "Không thể tìm thấy kết quả cho email này.");
+      
+      const responseText = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseErr) {
+        console.error("Failed to parse response as JSON:", responseText);
+        throw new Error("Không thể kết nối đến máy chủ hoặc máy chủ phản hồi không đúng định dạng. Vui lòng tải lại trang hoặc thử lại sau.");
       }
-      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Không thể tìm thấy kết quả cho email này.");
+      }
+
       if (data.success) {
         setLookupResult(data);
         setActiveEmail(email);

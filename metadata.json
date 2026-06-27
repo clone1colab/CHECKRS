@@ -1,0 +1,6 @@
+{
+  "name": "Tra Cứu Điểm Số Và Đáp Án",
+  "description": "Trang web công bố điểm số thi và so khớp chi tiết đáp án từng câu hỏi dành cho học sinh.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
